@@ -150,6 +150,11 @@ def parse_arguments() -> argparse.Namespace:
 
     # Feature flag for teleport, not exposed to the user yet
     parser.add_argument("--teleport", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--info",
+        action="store_true",
+        help="Write execution metrics to vibe_info.json for benchmarking.",
+    )
 
     continuation_group = parser.add_mutually_exclusive_group()
     continuation_group.add_argument(

@@ -804,6 +804,19 @@ class VibeApp(App):  # noqa: PLR0904
             )
 
         self.agent_loop.stats.add_listener("context_tokens", update_context_progress)
+        
+        # Add listener to display prompt tokens and completion time after each LLM response
+        def display_llm_usage(stats: AgentStats) -> None:
+            if stats.last_turn_prompt_tokens > 0:
+                # Get both tokens and duration
+                prompt_tokens = stats.last_turn_prompt_tokens
+                duration_seconds = stats.last_turn_duration
+                # Schedule async append after current event loop iteration
+                self.call_after_refresh(
+                    self._append_token_count_to_last_assistant_actual, prompt_tokens, duration_seconds
+                )
+        
+        self.agent_loop.stats.add_listener("last_turn_prompt_tokens", display_llm_usage)
         self.agent_loop.stats.trigger_listeners()
 
         self.agent_loop.set_approval_callback(self._approval_callback)
@@ -826,6 +839,18 @@ class VibeApp(App):  # noqa: PLR0904
 
         gc.collect()
         gc.freeze()
+
+    async def _append_token_count_to_last_assistant_actual(
+        self, token_count: int, duration_seconds: float
+    ) -> None:
+        """Append input token count and completion time to the last assistant message."""
+        for child in reversed(self._messages_area.children):
+            if isinstance(child, AssistantMessage):
+                await child.append_content(
+                    f"\n\n---\nInput tokens: {token_count:,} | "
+                    f"Time: {duration_seconds:.2f}s"
+                )
+                break
 
     def _start_post_ready_startup(self) -> None:
         self.run_worker(self._complete_post_ready_startup(), exclusive=False)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import aclosing
+from typing import TYPE_CHECKING
 
 from vibe import __version__
 from vibe.core.agent_loop import AgentLoop, TeleportError
@@ -17,8 +18,11 @@ from vibe.core.teleport.types import (
     TeleportPushRequiredEvent,
     TeleportPushResponseEvent,
 )
-from vibe.core.types import AssistantEvent, LLMMessage, OutputFormat, Role
+from vibe.core.types import AssistantEvent, LLMMessage, LLMUsage, OutputFormat, Role
 from vibe.core.utils import ConversationLimitException
+
+if TYPE_CHECKING:
+    from vibe.cli.info import InfoCollector
 
 __all__ = ["TeleportError", "run_programmatic"]
 
@@ -40,6 +44,7 @@ def run_programmatic(  # noqa: PLR0913, PLR0917
     headless: bool = False,
     hook_config_result: HookConfigResult | None = None,
     terminal_emulator: TerminalEmulator | None = None,
+    info_collector: InfoCollector | None = None,
 ) -> str | None:
     formatter = create_formatter(output_format)
 
@@ -77,6 +82,15 @@ def run_programmatic(  # noqa: PLR0913, PLR0917
                 await agent_loop.initialize_experiments()
                 agent_loop.emit_new_session_telemetry()
 
+            # Set provider and model info if info collector is enabled
+            if info_collector is not None:
+                try:
+                    active_model = config.get_active_model()
+                    provider = config.get_active_provider()
+                    info_collector.set_provider_info(provider.name, active_model.name)
+                except Exception:
+                    pass
+
             if teleport and config.vibe_code_enabled:
                 gen = agent_loop.teleport_to_vibe_code(
                     prompt or None, project_id=teleport_project_id
@@ -100,6 +114,21 @@ def run_programmatic(  # noqa: PLR0913, PLR0917
 
             return formatter.finalize()
         finally:
+            # Extract metrics from agent_loop if info collector is enabled
+            if info_collector is not None:
+                try:
+                    # Record token usage
+                    total_usage = LLMUsage(
+                        prompt_tokens=agent_loop.stats.session_prompt_tokens,
+                        completion_tokens=agent_loop.stats.session_completion_tokens,
+                    )
+                    info_collector.record_llm_usage(total_usage)
+                    
+
+                    
+                except Exception:
+                    pass
+                    
             agent_loop.emit_session_closed_telemetry()
             await agent_loop.aclose()
             await agent_loop.telemetry_client.aclose()

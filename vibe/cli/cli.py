@@ -42,6 +42,9 @@ from vibe.core.trusted_folders import find_trustable_files, trusted_folders_mana
 from vibe.core.types import LLMMessage, OutputFormat, Role
 from vibe.core.utils import ConversationLimitException
 
+if TYPE_CHECKING:
+    from vibe.cli.info import InfoCollector
+
 # The TUI app, onboarding, update prompt, and programmatic runner are each
 # imported at their call site: every launch needs at most one of them, and
 # they are too heavy to load speculatively at startup.
@@ -249,46 +252,59 @@ async def _resolve_programmatic_teleport_project(config: VibeConfig) -> str:
     return resolution.project_id
 
 
-def _run_programmatic_mode(
+def _resolve_teleport_project_id(
+    teleport: bool, config: VibeConfig, info_collector: InfoCollector | None
+) -> str | None:
+    """Resolve teleport project ID if teleport is enabled."""
+    if not teleport:
+        return None
+
+    from vibe.core.teleport.errors import ServiceTeleportError
+    from vibe.core.vibe_code_project import (
+        VibeCodeProjectApiError,
+        VibeCodeProjectResolverError,
+    )
+
+    try:
+        return asyncio.run(_resolve_programmatic_teleport_project(config))
+    except (
+        VibeCodeProjectApiError,
+        VibeCodeProjectResolverError,
+        ServiceTeleportError,
+    ) as e:
+        if info_collector:
+            info_collector.set_exit_code(1)
+            info_collector.finalize()
+            info_collector.write_json()
+        print(f"Teleport error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def _run_programmatic_with_info(
+    *,
     args: argparse.Namespace,
     config: VibeConfig,
-    initial_agent_name: str,
-    hook_config_result: HookConfigResult,
+    programmatic_prompt: str,
+    output_format: OutputFormat,
     loaded_session: tuple[list[LLMMessage], Path] | None,
-    stdin_prompt: str | None,
+    initial_agent_name: str,
+    teleport: bool,
+    teleport_project_id: str | None,
+    hook_config_result: HookConfigResult,
+    info_collector: InfoCollector | None,
 ) -> None:
-    warn_if_workdir_trust_is_unset()
-    config.disabled_tools = [
-        *config.disabled_tools,
-        "ask_user_question",
-        "exit_plan_mode",
-    ]
-    programmatic_prompt = args.prompt or stdin_prompt
-    if not programmatic_prompt:
-        print("Error: No prompt provided for programmatic mode", file=sys.stderr)
-        sys.exit(1)
-    output_format = OutputFormat(args.output if hasattr(args, "output") else "text")
+    """Run programmatic mode with info collection."""
+    def _handle_info_error() -> None:
+        if info_collector:
+            info_collector.set_exit_code(1)
+            info_collector.finalize()
+            info_collector.write_json()
 
-    teleport = args.teleport and config.vibe_code_enabled
-    teleport_project_id: str | None = None
-    if teleport:
-        from vibe.core.teleport.errors import ServiceTeleportError
-        from vibe.core.vibe_code_project import (
-            VibeCodeProjectApiError,
-            VibeCodeProjectResolverError,
-        )
-
-        try:
-            teleport_project_id = asyncio.run(
-                _resolve_programmatic_teleport_project(config)
-            )
-        except (
-            VibeCodeProjectApiError,
-            VibeCodeProjectResolverError,
-            ServiceTeleportError,
-        ) as e:
-            print(f"Teleport error: {e}", file=sys.stderr)
-            sys.exit(1)
+    def _handle_info_success() -> None:
+        if info_collector:
+            info_collector.set_exit_code(0)
+            info_collector.finalize()
+            info_collector.write_json()
 
     from vibe.core.programmatic import run_programmatic
 
@@ -307,19 +323,81 @@ def _run_programmatic_mode(
             headless=True,
             hook_config_result=hook_config_result,
             terminal_emulator=detect_terminal(),
+            info_collector=info_collector,
         )
         if final_response:
             print(final_response)
+
+        _handle_info_success()
         sys.exit(0)
     except ConversationLimitException as e:
+        _handle_info_error()
         print(e, file=sys.stderr)
         sys.exit(1)
     except TeleportError as e:
+        _handle_info_error()
         print(f"Teleport error: {e}", file=sys.stderr)
         sys.exit(1)
     except (RuntimeError, ValueError) as e:
+        _handle_info_error()
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
+
+
+def _run_programmatic_mode(
+    args: argparse.Namespace,
+    config: VibeConfig,
+    initial_agent_name: str,
+    hook_config_result: HookConfigResult,
+    loaded_session: tuple[list[LLMMessage], Path] | None,
+    stdin_prompt: str | None,
+) -> None:
+    from vibe.cli.info import InfoCollector
+
+    def _handle_info_error(info_collector: InfoCollector | None) -> None:
+        if info_collector:
+            info_collector.set_exit_code(1)
+            info_collector.finalize()
+            info_collector.write_json()
+
+    def _handle_info_success(info_collector: InfoCollector | None) -> None:
+        if info_collector:
+            info_collector.set_exit_code(0)
+            info_collector.finalize()
+            info_collector.write_json()
+
+    warn_if_workdir_trust_is_unset()
+    config.disabled_tools = [
+        *config.disabled_tools,
+        "ask_user_question",
+        "exit_plan_mode",
+    ]
+    programmatic_prompt = args.prompt or stdin_prompt
+    if not programmatic_prompt:
+        print("Error: No prompt provided for programmatic mode", file=sys.stderr)
+        sys.exit(1)
+    output_format = OutputFormat(args.output if hasattr(args, "output") else "text")
+
+    info_enabled = getattr(args, "info", False)
+    info_collector = InfoCollector() if info_enabled else None
+    if info_collector:
+        info_collector.start()
+
+    teleport = args.teleport and config.vibe_code_enabled
+    teleport_project_id = _resolve_teleport_project_id(teleport, config, info_collector)
+
+    _run_programmatic_with_info(
+        args=args,
+        config=config,
+        programmatic_prompt=programmatic_prompt,
+        output_format=output_format,
+        loaded_session=loaded_session,
+        initial_agent_name=initial_agent_name,
+        teleport=teleport,
+        teleport_project_id=teleport_project_id,
+        hook_config_result=hook_config_result,
+        info_collector=info_collector,
+    )
 
 
 def _run_interactive_mode(

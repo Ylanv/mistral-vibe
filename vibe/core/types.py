@@ -220,6 +220,7 @@ class ApprovalResponse(StrEnum):
 
 
 IMAGE_EXTENSIONS: frozenset[str] = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp"})
+PDF_EXTENSIONS: frozenset[str] = frozenset({".pdf"})
 MAX_IMAGE_BYTES: int = 10 * 1024 * 1024
 MAX_IMAGES_PER_MESSAGE: int = 8
 
@@ -415,11 +416,36 @@ class LLMUsage(BaseModel):
     model_config = ConfigDict(frozen=True)
     prompt_tokens: int = 0
     completion_tokens: int = 0
+    # Additional fields for more detailed usage tracking
+    cache_creation_input_tokens: int | None = None
+    cache_read_input_tokens: int | None = None
+    prompt_token_details: dict[str, Any] | None = None
+    num_cached_tokens: int | None = None
+    prompt_audio_seconds: int | None = None
+    total_tokens: int | None = None
 
     def __add__(self, other: LLMUsage) -> LLMUsage:
         return LLMUsage(
             prompt_tokens=self.prompt_tokens + other.prompt_tokens,
             completion_tokens=self.completion_tokens + other.completion_tokens,
+            cache_creation_input_tokens=(
+                self.cache_creation_input_tokens + other.cache_creation_input_tokens
+                if self.cache_creation_input_tokens is not None
+                and other.cache_creation_input_tokens is not None
+                else self.cache_creation_input_tokens or other.cache_creation_input_tokens
+            ),
+            cache_read_input_tokens=(
+                self.cache_read_input_tokens + other.cache_read_input_tokens
+                if self.cache_read_input_tokens is not None
+                and other.cache_read_input_tokens is not None
+                else self.cache_read_input_tokens or other.cache_read_input_tokens
+            ),
+            # For now, don't add detailed fields as it's unclear how to sum them
+            # They are kept as-is from the last usage chunk
+            prompt_token_details=self.prompt_token_details or other.prompt_token_details,
+            num_cached_tokens=self.num_cached_tokens or other.num_cached_tokens,
+            prompt_audio_seconds=self.prompt_audio_seconds or other.prompt_audio_seconds,
+            total_tokens=self.total_tokens or other.total_tokens,
         )
 
 

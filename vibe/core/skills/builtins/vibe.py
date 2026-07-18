@@ -666,6 +666,8 @@ the mention kind:
   every turn (no caching/dedup). The same limits as the `read_file` tool
   apply (~2000 lines / 50 KB per call; larger files are truncated or
   reported as an error result). Re-mentioning a file always re-reads it.
+- **PDF files** (`.pdf`) are automatically converted to Markdown and injected
+  as text content, so you can reference PDF documents directly in your prompts.
 - **Folders** are not read automatically — the path stays in your message
   text and the agent can `read_file`/`grep` it on demand.
 - **Image files** (`.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`) become image

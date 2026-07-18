@@ -1,0 +1,16 @@
+{
+  "provider": "mistral",
+  "model": "mistral-vibe-cli-latest",
+  "wall_time_ms": 7608.702498000639,
+  "ttft_ms": null,
+  "input_tokens": 20966,
+  "cache_creation_input_tokens": null,
+  "cache_read_input_tokens": null,
+  "effective_input_tokens": null,
+  "output_tokens": 433,
+  "total_cost_usd": null,
+  "stdout_bytes": 193,
+  "exit_code": 0,
+  "timestamp": "2026-07-18T11:19:38.210145+00:00",
+  "version": "2.21.0"
+}

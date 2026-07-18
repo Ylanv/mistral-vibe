@@ -187,6 +187,12 @@ class AnthropicMapper:
         usage = LLMUsage(
             prompt_tokens=total_input_tokens,
             completion_tokens=usage_data.get("output_tokens", 0),
+            cache_creation_input_tokens=usage_data.get("cache_creation_input_tokens", 0),
+            cache_read_input_tokens=usage_data.get("cache_read_input_tokens", 0),
+            prompt_token_details=None,  # Anthropic doesn't provide prompt_token_details
+            num_cached_tokens=None,  # Anthropic doesn't provide num_cached_tokens directly
+            prompt_audio_seconds=None,  # Anthropic doesn't provide audio metrics
+            total_tokens=total_input_tokens + usage_data.get("output_tokens", 0),
         )
 
         return LLMChunk(
@@ -414,7 +420,12 @@ class AnthropicAdapter(APIAdapter):
         )
         return LLMChunk(
             message=LLMMessage(role=Role.assistant, content=None),
-            usage=LLMUsage(prompt_tokens=total_input_tokens, completion_tokens=0),
+            usage=LLMUsage(
+                prompt_tokens=total_input_tokens,
+                completion_tokens=0,
+                cache_creation_input_tokens=0,
+                cache_read_input_tokens=0,
+            ),
         )
 
     def _parse_content_block_start(self, data: dict[str, Any]) -> LLMChunk | None:
@@ -498,7 +509,10 @@ class AnthropicAdapter(APIAdapter):
         usage_data = data.get("usage", {})
         usage = (
             LLMUsage(
-                prompt_tokens=0, completion_tokens=usage_data.get("output_tokens", 0)
+                prompt_tokens=0,
+                completion_tokens=usage_data.get("output_tokens", 0),
+                cache_creation_input_tokens=0,
+                cache_read_input_tokens=0,
             )
             if usage_data
             else None

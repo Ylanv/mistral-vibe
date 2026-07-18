@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator, Sequence
 import json
 import types
-from typing import TYPE_CHECKING, Literal, NamedTuple, cast
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple, cast
 
 import httpx
 from mistralai.client import Mistral
@@ -52,6 +52,18 @@ from vibe.core.utils.http import VibeAsyncHTTPClient, build_ssl_context
 
 if TYPE_CHECKING:
     from vibe.core.config import ModelConfig, ProviderConfig
+
+
+def _safe_getattr(obj: Any, attr: str) -> Any:
+    """Safely get attribute from Pydantic model, returning None if not set or doesn't exist."""
+    try:
+        value = getattr(obj, attr, None)
+        # Handle Pydantic's Unset object
+        if hasattr(value, '__class__') and value.__class__.__name__ == 'Unset':
+            return None
+        return value
+    except Exception:
+        return None
 
 
 class ParsedContent(NamedTuple):
@@ -334,6 +346,12 @@ class MistralBackend:
                 if message and message.content
                 else ParsedContent(content="", reasoning_content=None)
             )
+            # Extract cached tokens from prompt_tokens_details if available
+            prompt_token_details = _safe_getattr(response.usage, 'prompt_token_details')
+            cached_tokens = None
+            if prompt_token_details:
+                cached_tokens = _safe_getattr(prompt_token_details, 'cached_tokens')
+            
             return LLMChunk(
                 message=LLMMessage(
                     role=Role.assistant,
@@ -346,6 +364,12 @@ class MistralBackend:
                 usage=LLMUsage(
                     prompt_tokens=response.usage.prompt_tokens or 0,
                     completion_tokens=response.usage.completion_tokens or 0,
+                    cache_creation_input_tokens=None,  # Mistral doesn't provide separate cache details
+                    cache_read_input_tokens=None,  # Mistral doesn't provide separate cache details
+                    prompt_token_details=prompt_token_details,
+                    num_cached_tokens=cached_tokens,
+                    prompt_audio_seconds=_safe_getattr(response.usage, 'prompt_audio_seconds'),
+                    total_tokens=_safe_getattr(response.usage, 'total_tokens'),
                 ),
             )
 
@@ -417,6 +441,14 @@ class MistralBackend:
                     if chunk.data.choices[0].delta.content
                     else ParsedContent(content="", reasoning_content=None)
                 )
+                
+                # Extract cached tokens from prompt_tokens_details if available in streaming
+                usage_obj = chunk.data.usage
+                prompt_token_details = _safe_getattr(usage_obj, 'prompt_token_details') if usage_obj else None
+                cached_tokens = None
+                if prompt_token_details:
+                    cached_tokens = _safe_getattr(prompt_token_details, 'cached_tokens')
+                
                 yield LLMChunk(
                     message=LLMMessage(
                         role=Role.assistant,
@@ -428,15 +460,17 @@ class MistralBackend:
                         if chunk.data.choices[0].delta.tool_calls
                         else None,
                     ),
-                    usage=LLMUsage(
-                        prompt_tokens=chunk.data.usage.prompt_tokens or 0
-                        if chunk.data.usage
-                        else 0,
-                        completion_tokens=chunk.data.usage.completion_tokens or 0
-                        if chunk.data.usage
-                        else 0,
-                    ),
                     correlation_id=correlation_id,
+                    usage=LLMUsage(
+                        prompt_tokens=usage_obj.prompt_tokens or 0 if usage_obj else 0,
+                        completion_tokens=usage_obj.completion_tokens or 0 if usage_obj else 0,
+                        cache_creation_input_tokens=None,  # Mistral doesn't provide separate cache details in streaming
+                        cache_read_input_tokens=None,  # Mistral doesn't provide separate cache details in streaming
+                        prompt_token_details=prompt_token_details,
+                        num_cached_tokens=cached_tokens,
+                        prompt_audio_seconds=_safe_getattr(usage_obj, 'prompt_audio_seconds') if usage_obj else None,
+                        total_tokens=_safe_getattr(usage_obj, 'total_tokens') if usage_obj else None,
+                    ),
                 )
 
         except SDKError as e:

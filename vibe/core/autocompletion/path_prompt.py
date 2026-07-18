@@ -5,14 +5,14 @@ from pathlib import Path
 from typing import Literal
 
 from vibe.core.session.title_format import MentionSegment, TextSegment, TitleSegment
-from vibe.core.types import IMAGE_EXTENSIONS
+from vibe.core.types import IMAGE_EXTENSIONS, PDF_EXTENSIONS
 
 
 @dataclass(frozen=True, slots=True)
 class PathResource:
     path: Path
     alias: str
-    kind: Literal["file", "folder", "image"]
+    kind: Literal["file", "folder", "image", "pdf"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,11 +100,13 @@ def _to_resource(candidate: str, base_dir: Path) -> PathResource | None:
     if not resolved.exists():
         return None
 
-    kind: Literal["file", "folder", "image"]
+    kind: Literal["file", "folder", "image", "pdf"]
     if resolved.is_dir():
         kind = "folder"
     elif resolved.suffix.lower() in IMAGE_EXTENSIONS:
         kind = "image"
+    elif resolved.suffix.lower() in PDF_EXTENSIONS:
+        kind = "pdf"
     else:
         kind = "file"
     return PathResource(path=resolved, alias=candidate, kind=kind)

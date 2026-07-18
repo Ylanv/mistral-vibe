@@ -24,7 +24,7 @@ from pydantic import BaseModel, ValidationError
 from vibe.core.agent_loop_hooks import AgentLoopHooksMixin
 from vibe.core.agents.manager import AgentManager
 from vibe.core.agents.models import AgentProfile, BuiltinAgentName
-from vibe.core.autocompletion.path_prompt import build_path_prompt_payload
+from vibe.core.autocompletion.path_prompt import PathResource, build_path_prompt_payload
 from vibe.core.cache_store import InMemoryVibeCodeCacheStore, VibeCodeCacheStore
 from vibe.core.checkpoints import Checkpointer, CheckpointRecorder, FileStore
 from vibe.core.compaction import (
@@ -77,6 +77,7 @@ from vibe.core.rewind import RewindManager
 from vibe.core.scratchpad import init_scratchpad
 from vibe.core.session.session_id import extract_suffix, generate_session_id
 from vibe.core.session.session_logger import SessionLogger
+from vibe.core.utils.pdf import PDFConversionError, convert_pdf_to_markdown
 from vibe.core.session.session_migration import migrate_sessions_entrypoint
 from vibe.core.skills.manager import SkillManager
 from vibe.core.system_prompt import get_universal_system_prompt
@@ -1454,6 +1455,33 @@ class AgentLoop(AgentLoopHooksMixin):  # noqa: PLR0904
     ) -> AsyncGenerator[BaseEvent, None]:
         payload = build_path_prompt_payload(user_msg)
         file_resources = [r for r in payload.resources if r.kind == "file"]
+        pdf_resources = [r for r in payload.resources if r.kind == "pdf"]
+        
+        # Handle PDF resources by converting to Markdown and injecting directly
+        for resource in pdf_resources:
+            try:
+                # Convert PDF to Markdown
+                markdown_content = await convert_pdf_to_markdown(resource.path)
+                
+                # Inject the Markdown content as a file read result
+                # Use the same pattern as regular read_file tool results
+                injected_message = LLMMessage(
+                    role=Role.user,
+                    content=f"Contents of {resource.alias} (converted from PDF):\n\n" + markdown_content,
+                    injected=True,
+                )
+                self._pending_injected_messages.append(injected_message)
+                
+            except PDFConversionError as e:
+                # Inject an error message
+                error_message = LLMMessage(
+                    role=Role.user,
+                    content=f"Failed to read `{resource.alias}`: {e.message}",
+                    injected=True,
+                )
+                self._pending_injected_messages.append(error_message)
+        
+        # Handle regular file resources
         if not file_resources:
             return
         try:
